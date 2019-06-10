@@ -1,0 +1,19 @@
+#!/bin/bash
+## ---------------------------------------
+## A simple script to list running jobs
+## and their working directories.
+## 
+## Platform: WHU_hpc with SLURM
+## Author  : Kaixiang Huang
+## ---------------------------------------
+
+/usr/bin/squeue -u $USER -o '%.8A %.9P %.13j %.2t %.12M %.5D %.4C %R %Z' $@ |\
+    awk '{
+        if(NR==1)
+            printf "%11s %9s      JOBNAME STATUS %10s %5s %4s %s\n",\
+                $1, $2, $5, $6, $7, $8;
+        else
+            printf "%12s  %-6s %13s   %-2s %12s %3s   %3s  %-s\n    %s\n\n",\
+                $1, $2, $3, $4, $5, $6, $7, $8, $9;
+        fi
+    }'

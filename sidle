@@ -1,0 +1,123 @@
+#!/bin/bash
+## ---------------------------------------
+## A simple script to list idle nodes
+## in SLURM system.
+##
+## Platform: WHU_hpc with SLURM
+## Author  : Kaixiang Huang
+## ---------------------------------------
+
+squeues=$(/usr/bin/squeue -u $USER -o '%P %C %T' | grep RUNNING |\
+    awk '{
+		  a[$1]+=$2;
+    }
+    END{for(i in a){print i, a[i]}}'
+)
+
+idlenodes=$(/usr/bin/sinfo -o "%R %t %D %c" | grep idle)
+mixednodes=$(/usr/bin/sinfo -o "%R %n %t %C" | grep mix |\
+			sed 's/ [0-9]*\// /g; s/\/0\/[0-9]*//g')
+num_mix=($(echo "$mixednodes" | cut -d ' ' -f1 | uniq -c | awk '{print $1}'))
+
+declare -A usedcpus
+while IFS=' ' read node cpus
+do
+	if [ -z "$node" ]; then
+		break
+	fi
+	usedcpus["$node"]=$cpus
+done <<< "$squeues"
+unset squeues
+
+limitnodes=(
+$(while read line
+do
+	if [ "$line" = '' ]; then
+		line=_default
+	fi
+	printf "$line "
+done <<- end
+$(sacctmgr show ass user=$USER format=Partition |\
+	sed '1,2d; s/^[ \t]*//g; s/[ \t]*$//g')
+end
+))
+
+limitcpus=(
+$(while read line
+do
+	if [ "$line" = '' ]; then
+		line='inf'
+	fi
+	printf "$line "
+done <<- end
+$(sacctmgr show ass user=$USER format=GrpTRES |\
+   	sed '1,2d; s/cpu=//g; s/^[ \t]*//g; s/[ \t]*$//g')
+end
+))
+
+declare -A accavail
+for i in ${!limitnodes[*]}
+do
+	accavail["${limitnodes[$i]}"]=${limitcpus[$i]}
+done
+unset limitcpus
+
+for i in ${!usedcpus[@]}
+do
+	if (echo "${limitnodes[*]}" | fgrep -q "$i"); then
+		j="$i"
+	else
+		j=_default
+	fi
+	if [ ${accavail["$j"]} != 'inf' ]; then
+		((accavail["$j"]-=${usedcpus["$i"]}))
+	fi
+done
+unset usedcpus
+
+echo "  MIXED NODES:"
+printf "    PARTITION  IDLE_CPUS    MIXED_NODES   ACCOUNT_AVAIL_CPUS\n"
+num_count=0
+node_count=-1
+while IFS=' ' read name host mix icpus
+do
+    if (echo "${limitnodes[*]}" | fgrep -q "$name"); then
+        node=$name
+    else
+        node=_default
+    fi
+	if [ "$node_count" = -1 -o "$name" != "$name_old" ]; then
+		name_old="$name"
+		((node_count+=1))
+		((num_count+=1))
+    printf "      %-6s                   %3d              %4s\n" \
+            $name ${num_mix[$node_count]} ${accavail["$node"]}
+	else
+		((num_count+=1))
+	fi
+
+	if [ "$num_count" = "${num_mix[$node_count]}" ]; then
+		env printf "      \u2517%-6s    %3d\n" \
+					$host $icpus
+		num_count=0
+	else
+		env printf "      \u2523%-6s    %3d\n" \
+					$host $icpus
+	fi
+
+done <<< "$mixednodes"
+unset num_count node_count mixednodes num_mix
+
+echo -e "\n  IDLE NODES:"
+printf "    PARTITION  IDLE_NODES  CPUS_PER_NODE  ACCOUNT_AVAIL_CPUS\n"
+while IFS=' ' read name idle nodes cpern
+do
+	if (echo "${limitnodes[*]}" | fgrep -q "$name"); then
+		node=$name
+	else
+		node=_default
+	fi
+	printf "      %-6s      %3d          %3d              %4d\n" \
+			$name $nodes $cpern ${accavail["$node"]}
+done <<< "$idlenodes"
+unset name node nodes idle mix cpern icpus limitnodes idlenodes accavail
