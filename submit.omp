@@ -1,0 +1,197 @@
+#!/bin/bash
+## ---------------------------------------
+## A simple script to submit OpenMP jobs
+## easily.
+## The names of output file and log file
+## have been changed easy to distinguish.
+##
+## Platform: WHU_hpc with SLURM
+## Author  : Kaixiang Huang
+## ---------------------------------------
+
+## ======== helper functions and global variables ========
+
+## the paid account
+PAIDACC=sjyuan
+
+## short options
+SHORTOPT='p:c:J:h'
+
+## long options
+LONGOPT='partition:,cpus_per_task:,job-name:,help,exclusive'
+
+## print copyright message
+copyright()
+{
+	echo "A convenient tool to submit an OpenMP job to SLURM. Author: KX Huang"
+	echo
+}
+
+## print usage message
+usage()
+{
+	echo "Usage:"
+	echo "    submit.omp [options] -J|--job-name <jobname> command [args]"
+	echo
+	echo "Compulsory option:"
+	echo " -J, --job-name <jobname>       set the name of the job"
+	echo
+}
+
+## print help message
+help()
+{
+	copyright
+	usage
+	echo "Fundamental options:"
+	echo " -p, --partition <partition>    the partition to submit the job"
+	echo "                                default: free"
+	echo " -c, --cpus_per_task <ncpus>    total number of cores"
+	echo "                                default: 16"
+	echo
+	echo "Extra options:"
+	echo "     --exclusive                get exclusive privilege"
+	exit 1
+}
+
+## print help message if there's no arguments
+if [ $# -eq 0 ]; then
+	copyright
+	usage
+	echo "Use -h or --help for help."
+	exit 1
+fi
+
+
+## ======== deal with arguments ========
+
+## set default values
+PARTITION=free
+CPUS_PER_TASK=16
+unset JOBNAME
+
+## define scanning mode
+POSIXLY_CORRECT=1
+
+## get all the arguments
+OPTS=`getopt --options $SHORTOPT --longoptions $LONGOPT -- "$@"`
+eval set -- "$OPTS"
+
+## parse the arguments
+while true; do
+	case "$1" in
+		-p | --partition)
+			PARTITION="$2"
+			shift 2
+			;;
+		-c | --cpus_per_task)
+			CPUS_PER_TASK="$2"
+			shift 2
+			;;
+		-J | --job-name)
+			JOBNAME="$2"
+			shift 2
+			;;
+		--exclusive)
+			EXCLUSIVE="--exclusive=user"
+			shift
+			;;
+		--)
+			shift
+			break
+			;;
+		-h | --help) help ;;
+		*)
+			echo 'Error: argument "$1" is invalid!' >&2
+			exit 1
+			;;
+	esac
+done
+
+## a job name is required
+if [ -z "$JOBNAME" ]; then
+	echo "Error: You must specify a job name!" >&2
+	usage >&2
+	echo "Use -h or --help for help." >&2
+	exit 1
+fi
+
+## pass the else as job command
+CMD="$@"
+
+
+## ======== combine arguments for sbatch ========
+
+## use paid account if $PARTITION!=free
+if [ "$PARTITION" == "free" ]; then
+	if [ $CPUS_PER_TASK -gt 16 ]; then
+		echo "Error: You submit a job to free partition"\
+			 "with more than 16 cores!" >&2
+		exit 2
+	fi
+    PARTITION=hpxg
+	EXTRA=\(free\)
+	ACCOUNT=$USER
+else
+	ACCOUNT=$PAIDACC
+fi
+
+## check if $PARTITION is valid
+for i in `/usr/bin/sinfo -o '%R' | sed '1d'`
+do
+	[[ "$PARTITION" == "$i" ]] && valid=1
+done
+if [ $valid != 1 ]; then
+	echo "Error: invalid partition $PARTITION!!" >&2
+	exit 2
+fi
+
+## get date to distinguish log files
+DATE=`date '+%m%d%H%M'`
+
+## combine all the arguments
+ARGUMENTS="-J $JOBNAME -o '$JOBNAME-$DATE.log' $EXCLUSIVE"
+ARGUMENTS+=" -p $PARTITION -c $CPUS_PER_TASK -A $ACCOUNT"
+
+
+## ======== print information of the job and resource ========
+
+echo "You are submitting the OpenMP job '$JOBNAME' with $CPUS_PER_TASK cores"\
+	 "to $PARTITION$EXTRA."
+echo "Output is redirected to '$JOBNAME.out'"
+echo "Logs of SLURM are in '$JOBNAME-$DATE.log'"
+echo
+echo "information of account $ACCOUNT on partition $PARTITION$EXTRA:"
+
+#### information of $ACCOUNT on $PARTITION
+## limitation
+limcores=$(sacctmgr show ass user=$USER account=$ACCOUNT \
+		   format=Partition,GrpTRES |
+		   sed '1,2d; s/cpu=//g; s/[ \t]*$//g' |
+		   grep $PARTITION | awk '{print $2}')
+## running
+runcores=$(/usr/bin/squeue -A $ACCOUNT -o '%P %C %t' | grep $PARTITION.*R |
+	awk '{a+=$2;} END{if(a=="")a=0; print a}')
+## pending
+pdcores=$(/usr/bin/squeue -A $ACCOUNT -o '%P %C %t' | grep $PARTITION.*PD |
+	awk '{a+=$2;} END{if(a=="")a=0; print a}')
+
+echo "limit - $limcores cores, submitted - $(($runcores+$pdcores))"
+echo "  in which"
+echo "running - $runcores cores, pending - $pdcores cores"
+echo
+
+
+## ======== use here-document to submit the job to SLURM ========
+
+sbatch > /dev/null <<- submit
+	#!/bin/bash
+	#SBATCH $ARGUMENTS -N 1
+
+	export OMP_NUM_THREADS=$CPUS_PER_TASK
+	srun -c $CPUS_PER_TASK $CMD > "$JOBNAME.out"
+submit
+
+if [ $? -eq 0 ]; then
+	echo "Job $JOBNAME submitted successfully!"
+fi
