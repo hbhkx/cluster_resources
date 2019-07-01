@@ -51,6 +51,7 @@ module load vasp
 submit.mpi -J 任务名 vasp
 ```
 **`-J`中的字母J必须大写！！！**
+
 以上为*默认提交方式*，默认的提交方式是**向不收费的节点提交16核的任务**，即对应
 ```bash
 submit.mpi -p free -n 16 -J 任务名 可执行程序
@@ -69,6 +70,7 @@ module load tipsi/stable
 submit.omp -J 任务名 python 文件名
 ```
 **`-J`中的字母J必须大写！！！**
+
 以上为*默认提交方式*，默认的提交方式是**向不收费的节点提交16核的任务**，即对应
 ```bash
 submit.omp -p free -c 16 -J 任务名 可执行程序
@@ -85,6 +87,7 @@ submit.omp -p free -c 16 -J 任务名 可执行程序
 submit.serial -J 任务名 可执行程序
 ```
 **`-J`中的字母J必须大写！！！**
+
 以上为*默认提交方式*，默认的提交方式是**向不收费的节点提交的任务**，即对应
 ```bash
 submit.serial -p free -J 任务名 可执行程序
